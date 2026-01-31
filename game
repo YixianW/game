@@ -1,0 +1,303 @@
+import pygame
+import sys
+import random
+
+# --- Constants & Configuration ---
+GRID_SIZE = 50
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 700 
+FPS = 60
+
+# Mario Palette
+COLORS = {
+    "sky_blue": (107, 140, 255),
+    "brick_brown": (166, 76, 32),
+    "brick_detail": (214, 122, 70),
+    "road_gray": (80, 80, 80),
+    "mario_red": (230, 20, 20),
+    "mario_blue": (30, 50, 220),
+    "mario_skin": (255, 206, 158),
+    "goomba_brown": (165, 42, 42),
+    "bullet_black": (20, 20, 20),
+    "pipe_green": (0, 180, 0),
+    "pipe_light": (80, 220, 80),
+    "cloud_white": (255, 255, 255),
+    "coin_gold": (255, 215, 0),
+    "grass_green": (34, 139, 34)
+}
+
+# --- Classes ---
+
+class Player:
+    def __init__(self):
+        self.reset_game()
+        
+    def reset_game(self):
+        self.start_pos = (SCREEN_WIDTH // 2 - GRID_SIZE // 2, SCREEN_HEIGHT - GRID_SIZE)
+        self.rect = pygame.Rect(self.start_pos[0], self.start_pos[1], GRID_SIZE - 12, GRID_SIZE - 12)
+        self.step = GRID_SIZE
+        self.score = 0
+        self.facing = "RIGHT"
+        self.on_platform = False 
+
+    def move(self, dx, dy):
+        new_x = self.rect.x + (dx * self.step)
+        new_y = self.rect.y + (dy * self.step)
+
+        if dx > 0: self.facing = "RIGHT"
+        elif dx < 0: self.facing = "LEFT"
+
+        if 0 <= new_x <= SCREEN_WIDTH - GRID_SIZE:
+            self.rect.x = new_x
+        if 0 <= new_y <= SCREEN_HEIGHT:
+            self.rect.y = new_y
+
+    def reset_position(self):
+        self.rect.x, self.rect.y = self.start_pos
+
+    def draw(self, surface):
+        x, y = self.rect.x, self.rect.y
+        w, h = self.rect.width, self.rect.height
+        
+        # Mario Hat
+        pygame.draw.rect(surface, COLORS["mario_red"], (x, y, w, h//3))
+        brim = (x + w - 10, y + 10, 15, 5) if self.facing == "RIGHT" else (x - 5, y + 10, 15, 5)
+        pygame.draw.rect(surface, COLORS["mario_red"], brim)
+        # Face
+        pygame.draw.rect(surface, COLORS["mario_skin"], (x + 4, y + h//3, w - 8, h//3))
+        # Mustache
+        mustache_x = x + w - 12 if self.facing == "RIGHT" else x + 4
+        pygame.draw.rect(surface, (0,0,0), (mustache_x, y + h//2 + 2, 10, 4))
+        # Body
+        pygame.draw.rect(surface, COLORS["mario_blue"], (x + 6, y + 2*h//3, w - 12, h//3))
+        pygame.draw.rect(surface, COLORS["coin_gold"], (x + 10, y + 2*h//3 + 4, 4, 4)) 
+
+class Enemy:
+    def __init__(self, x, y, speed, direction, type="goomba"):
+        self.rect = pygame.Rect(x, y + 10, GRID_SIZE - 5, GRID_SIZE - 15)
+        self.speed = speed
+        self.direction = direction 
+        self.type = type
+
+    def update(self):
+        self.rect.x += self.speed * self.direction
+        if self.direction == 1 and self.rect.x > SCREEN_WIDTH: self.rect.x = -self.rect.width
+        elif self.direction == -1 and self.rect.x + self.rect.width < 0: self.rect.x = SCREEN_WIDTH
+
+    def draw(self, surface):
+        x, y = self.rect.x, self.rect.y
+        if self.type == "goomba":
+            pygame.draw.ellipse(surface, COLORS["goomba_brown"], (x, y, self.rect.w, self.rect.h))
+            pygame.draw.rect(surface, (0,0,0), (x + 5, y + 20, 5, 5))
+            pygame.draw.rect(surface, (0,0,0), (x + 25, y + 20, 5, 5))
+        elif self.type == "bullet":
+            pygame.draw.rect(surface, COLORS["bullet_black"], self.rect, border_radius=8)
+            pygame.draw.rect(surface, (255,255,255), (x + 5, y + 5, 10, 5)) 
+
+class Cloud:
+    def __init__(self, x, y, speed, direction):
+        self.rect = pygame.Rect(x, y, GRID_SIZE * 2, GRID_SIZE)
+        self.speed = speed
+        self.direction = direction
+
+    def update(self):
+        self.rect.x += self.speed * self.direction
+        if self.direction == 1 and self.rect.x > SCREEN_WIDTH: self.rect.x = -self.rect.width * 1.5
+        elif self.direction == -1 and self.rect.x + self.rect.width < 0: self.rect.x = SCREEN_WIDTH
+
+    def draw(self, surface):
+        pygame.draw.ellipse(surface, COLORS["cloud_white"], (self.rect.x, self.rect.y + 5, 40, 40))
+        pygame.draw.ellipse(surface, COLORS["cloud_white"], (self.rect.x + 20, self.rect.y + 5, 40, 40))
+        pygame.draw.ellipse(surface, COLORS["cloud_white"], (self.rect.x + 40, self.rect.y + 5, 40, 40))
+
+class Coin:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x + 15, y + 15, 20, 20)
+    
+    def draw(self, surface):
+        pygame.draw.ellipse(surface, COLORS["coin_gold"], self.rect)
+        pygame.draw.ellipse(surface, (255, 240, 100), self.rect.inflate(-8, -8))
+
+class Pipe:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x + 2, y + 10, GRID_SIZE - 4, GRID_SIZE - 10)
+        self.entry_rect = pygame.Rect(x, y, GRID_SIZE, 15) 
+
+    def draw(self, surface):
+        pygame.draw.rect(surface, COLORS["pipe_green"], self.rect)
+        pygame.draw.rect(surface, COLORS["pipe_green"], self.entry_rect)
+        pygame.draw.rect(surface, COLORS["pipe_light"], (self.rect.x + 5, self.rect.y, 8, self.rect.h))
+
+# --- Manager ---
+
+class GameManager:
+    def __init__(self):
+        self.player = Player()
+        self.font = pygame.font.SysFont("Impact", 30)
+        self.game_over = False
+        self.setup_level()
+
+    def setup_level(self):
+        self.enemies = []
+        self.clouds = []
+        self.coins = []
+        self.pipes = []
+        
+        # 1. SETUP PIPES (Goal)
+        pipe_spacing = SCREEN_WIDTH // 6
+        for i in range(6):
+            self.pipes.append(Pipe(i * pipe_spacing + (pipe_spacing - GRID_SIZE)//2, 0))
+
+        # 2. SETUP ROWS
+        # 0: Start
+        # 1-3: Road 1
+        # 4: Rest 1
+        # 5-7: Clouds
+        # 8: Rest 2
+        # 9-11: Road 2
+        # 12: Finish Brick
+
+        # -- Lower Road Enemies --
+        lower_road = [(1, 3, 1, "goomba"), (2, 5, -1, "bullet"), (3, 4, 1, "goomba")]
+        for row, speed, direction, type in lower_road:
+            y = SCREEN_HEIGHT - (row + 1) * GRID_SIZE
+            for _ in range(random.randint(2, 3)):
+                self.enemies.append(Enemy(random.randint(0, SCREEN_WIDTH), y, speed, direction, type))
+            if random.random() > 0.6: self.coins.append(Coin(random.randint(0, SCREEN_WIDTH), y))
+
+        # -- Clouds --
+        # Increased cloud density to 4 clouds per row (Bug Fix 2)
+        cloud_lanes = [(5, 2, 1), (6, 3, -1), (7, 4, 1)]
+        for row, speed, direction in cloud_lanes:
+            y = SCREEN_HEIGHT - (row + 1) * GRID_SIZE
+            for _ in range(4): 
+                self.clouds.append(Cloud(random.randint(0, SCREEN_WIDTH), y, speed, direction))
+
+        # -- Upper Road Enemies --
+        upper_road = [(9, 6, 1, "bullet"), (10, 4, -1, "goomba"), (11, 7, 1, "bullet")]
+        for row, speed, direction, type in upper_road:
+            y = SCREEN_HEIGHT - (row + 1) * GRID_SIZE
+            for _ in range(random.randint(2, 3)):
+                self.enemies.append(Enemy(random.randint(0, SCREEN_WIDTH), y, speed, direction, type))
+            if random.random() > 0.5: self.coins.append(Coin(random.randint(0, SCREEN_WIDTH), y))
+
+
+    def draw_environment(self, screen):
+        for row in range(SCREEN_HEIGHT // GRID_SIZE):
+            y = row * GRID_SIZE
+            row_idx = (SCREEN_HEIGHT - y) // GRID_SIZE - 1
+            
+            # Start and End Bricks (0 and 12)
+            if row_idx in [0, 12]:
+                pygame.draw.rect(screen, COLORS["brick_brown"], (0, y, SCREEN_WIDTH, GRID_SIZE))
+                for bx in range(0, SCREEN_WIDTH, 25):
+                    pygame.draw.rect(screen, COLORS["brick_detail"], (bx, y, 2, GRID_SIZE))
+                    pygame.draw.rect(screen, COLORS["brick_detail"], (0, y + 25, SCREEN_WIDTH, 2))
+
+            # Rest Zones (Row 4 and Row 8)
+            elif row_idx in [4, 8]:
+                pygame.draw.rect(screen, COLORS["grass_green"], (0, y, SCREEN_WIDTH, GRID_SIZE))
+                for bx in range(50, SCREEN_WIDTH, 100):
+                    pygame.draw.circle(screen, (0, 100, 0), (bx, y + 30), 20)
+                    pygame.draw.circle(screen, (0, 100, 0), (bx + 20, y + 30), 20)
+
+            # Road Zones
+            elif row_idx in [1, 2, 3, 9, 10, 11]:
+                pygame.draw.rect(screen, COLORS["road_gray"], (0, y, SCREEN_WIDTH, GRID_SIZE))
+
+    def update(self):
+        if self.game_over: return
+
+        for e in self.enemies: e.update()
+        for c in self.clouds: c.update()
+
+        player_hitbox = self.player.rect.inflate(-10, -10)
+        
+        # 1. Enemies
+        for e in self.enemies:
+            if player_hitbox.colliderect(e.rect): self.game_over = True
+        
+        # 2. Coins
+        for coin in self.coins[:]:
+            if player_hitbox.colliderect(coin.rect):
+                self.coins.remove(coin)
+                self.player.score += 1
+
+        # 3. Cloud Logic (Water/Sky rows)
+        # FIX: Removed the '-1' offset which was causing the bugs
+        player_row = (SCREEN_HEIGHT - self.player.rect.centery) // GRID_SIZE 
+        
+        # Rows 5, 6, 7 are Cloud/Water rows
+        if player_row in [5, 6, 7]:
+            self.player.on_platform = False
+            for cloud in self.clouds:
+                if self.player.rect.colliderect(cloud.rect.inflate(-10, 0)):
+                    self.player.on_platform = True
+                    self.player.rect.x += cloud.speed * cloud.direction
+                    break
+            if not self.player.on_platform: self.game_over = True
+
+        # 4. Win Condition (Row 13+)
+        if player_row >= 12: 
+            entered_pipe = False
+            for pipe in self.pipes:
+                if self.player.rect.colliderect(pipe.rect):
+                    entered_pipe = True
+                    self.player.score += 5
+                    self.player.reset_position()
+                    self.setup_level()
+                    break
+            
+            if not entered_pipe and self.player.rect.y < GRID_SIZE:
+                self.player.rect.y = GRID_SIZE 
+
+    def draw_ui(self, screen):
+        t = self.font.render(f"SCORE: {self.player.score}", True, (255, 255, 255))
+        screen.blit(t, (20, 20))
+        if self.game_over:
+            t_over = self.font.render("GAME OVER - SPACE TO RESTART", True, (255, 0, 0))
+            rect = t_over.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
+            pygame.draw.rect(screen, (0,0,0), rect.inflate(20,10))
+            screen.blit(t_over, rect)
+
+# --- Main ---
+def main():
+    pygame.init()
+    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    pygame.display.set_caption("Super Crossy Bros: Bug Fix Edition")
+    clock = pygame.time.Clock()
+    game = GameManager()
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT: sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if game.game_over and event.key == pygame.K_SPACE:
+                    game.player.reset_game()
+                    game.setup_level()
+                    game.game_over = False
+                elif not game.game_over:
+                    if event.key == pygame.K_UP: game.player.move(0, -1)
+                    elif event.key == pygame.K_DOWN: game.player.move(0, 1)
+                    elif event.key == pygame.K_LEFT: game.player.move(-1, 0)
+                    elif event.key == pygame.K_RIGHT: game.player.move(1, 0)
+
+        game.update()
+        screen.fill(COLORS["sky_blue"])
+        game.draw_environment(screen)
+        
+        for p in game.pipes: p.draw(screen)
+        for c in game.clouds: c.draw(screen)
+        for e in game.enemies: e.draw(screen)
+        for c in game.coins: c.draw(screen)
+        
+        game.player.draw(screen)
+        game.draw_ui(screen)
+
+        pygame.display.flip()
+        clock.tick(FPS)
+
+if __name__ == "__main__":
+    main()
+
+    
